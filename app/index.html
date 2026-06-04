@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DevOps Project</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+    }
+    .container {
+      text-align: center;
+      padding: 40px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 20px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.2);
+      max-width: 600px;
+    }
+    h1 { font-size: 2.5rem; margin-bottom: 10px; color: #e94560; }
+    .badge {
+      display: inline-block;
+      background: #e94560;
+      padding: 5px 15px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      margin: 10px 5px;
+    }
+    .info { margin-top: 20px; font-size: 1.1rem; opacity: 0.85; }
+    .version { margin-top: 20px; font-size: 0.9rem; opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 DevOps Pipeline</h1>
+    <p>Successfully Deployed via CI/CD!</p>
+    <div>
+      <span class="badge">Docker</span>
+      <span class="badge">Jenkins</span>
+      <span class="badge">GitHub</span>
+      <span class="badge">Nginx</span>
+    </div>
+    <div class="info">
+      ✅ Build Passed &nbsp;|&nbsp; ✅ Tests Passed &nbsp;|&nbsp; ✅ Deployed
+    </div>
+    <div class="version">Version: 1.0.0 | Environment: Local</div>
+  </div>
+</body>
+</html>
