@@ -18,10 +18,21 @@ pipeline {
         stage('Validate') {
             steps {
                 echo 'Validating project files...'
-                bat '''
-                    if exist Dockerfile (echo Dockerfile found) else (echo Dockerfile MISSING && exit 1)
-                    if exist app\\index.html (echo index.html found) else (echo index.html MISSING && exit 1)
-                    echo Validation complete!
+                sh '''
+                    echo "Checking required files..."
+                    if [ -f Dockerfile ]; then
+                        echo "Dockerfile found"
+                    else
+                        echo "Dockerfile NOT found"
+                        exit 1
+                    fi
+                    if [ -f app/index.html ]; then
+                        echo "index.html found"
+                    else
+                        echo "index.html NOT found"
+                        exit 1
+                    fi
+                    echo "Validation complete!"
                 '''
             }
         }
@@ -29,21 +40,35 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 echo 'Building Docker image...'
-                bat "docker build -t %APP_NAME%:%IMAGE_TAG% ."
-                bat "docker tag %APP_NAME%:%IMAGE_TAG% %APP_NAME%:latest"
-                echo 'Image built successfully!'
+                sh "docker build -t ${APP_NAME}:${IMAGE_TAG} ."
+                sh "docker tag ${APP_NAME}:${IMAGE_TAG} ${APP_NAME}:latest"
+                echo "Image built successfully!"
             }
         }
 
         stage('Test') {
             steps {
                 echo 'Running tests...'
-                bat '''
+                sh '''
+                    docker stop test-container 2>/dev/null || true
+                    docker rm test-container 2>/dev/null || true
+
                     docker run -d --name test-container -p 3001:80 devops-webapp:latest
-                    ping -n 5 127.0.0.1 > nul
+
+                    sleep 3
+
+                    STATUS=$(docker inspect --format="{{.State.Status}}" test-container)
+                    echo "Container Status: $STATUS"
+
                     docker stop test-container
                     docker rm test-container
-                    echo Test passed!
+
+                    if [ "$STATUS" = "running" ]; then
+                        echo "Test Passed!"
+                    else
+                        echo "Test Failed!"
+                        exit 1
+                    fi
                 '''
             }
         }
@@ -51,11 +76,27 @@ pipeline {
         stage('Deploy') {
             steps {
                 echo 'Deploying application...'
-                bat '''
-                    docker stop devops-webapp 2>nul || echo No running container
-                    docker rm devops-webapp 2>nul || echo No container to remove
-                    docker run -d --name devops-webapp -p 3000:80 devops-webapp:latest
-                    echo Deployment successful!
+                sh '''
+                    docker stop devops-webapp 2>/dev/null || true
+                    docker rm devops-webapp 2>/dev/null || true
+
+                    docker run -d \
+                        --name devops-webapp \
+                        -p 3000:80 \
+                        --restart unless-stopped \
+                        devops-webapp:latest
+
+                    sleep 2
+
+                    STATUS=$(docker inspect --format="{{.State.Status}}" devops-webapp)
+                    echo "Deployment Status: $STATUS"
+
+                    if [ "$STATUS" = "running" ]; then
+                        echo "Deployment Successful!"
+                    else
+                        echo "Deployment Failed!"
+                        exit 1
+                    fi
                 '''
             }
         }
@@ -63,10 +104,15 @@ pipeline {
         stage('Verify') {
             steps {
                 echo 'Verifying deployment...'
-                bat '''
-                    ping -n 5 127.0.0.1 > nul
-                    docker ps --filter "name=devops-webapp"
-                    echo App is live at http://localhost:3000
+                sh '''
+                    sleep 2
+                    STATUS=$(docker inspect --format="{{.State.Status}}" devops-webapp)
+                    if [ "$STATUS" = "running" ]; then
+                        echo "Verification Passed! App is live!"
+                    else
+                        echo "Verification Failed!"
+                        exit 1
+                    fi
                 '''
             }
         }
@@ -74,13 +120,22 @@ pipeline {
 
     post {
         success {
-            echo 'PIPELINE SUCCESS! App is live at http://localhost:3000'
+            echo '''
+            ============================================
+            PIPELINE SUCCESS!
+            App is live at http://localhost:3000
+            ============================================
+            '''
         }
         failure {
-            echo 'PIPELINE FAILED! Check the logs above.'
+            echo '''
+            ============================================
+            PIPELINE FAILED! Check logs above.
+            ============================================
+            '''
         }
         always {
-            echo 'Pipeline finished.'
+            echo "Pipeline finished. Build done!"
         }
     }
 }
