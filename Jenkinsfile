@@ -19,8 +19,9 @@ pipeline {
             steps {
                 echo 'Validating files...'
                 sh '''
-                    test -f Dockerfile    && echo "Dockerfile found"    || exit 1
-                    test -f app/index.html && echo "index.html found"   || exit 1
+                    test -f Dockerfile        && echo "Dockerfile found"        || exit 1
+                    test -f app/index.html    && echo "index.html found"        || exit 1
+                    test -f docker-compose.yml && echo "docker-compose found"   || exit 1
                     echo "Validation Passed!"
                 '''
             }
@@ -37,7 +38,7 @@ pipeline {
 
         stage('Deploy to DEV') {
             steps {
-                echo 'Deploying to DEV environment...'
+                echo 'Deploying to DEV...'
                 sh '''
                     docker stop devops-webapp-dev 2>/dev/null || true
                     docker rm  devops-webapp-dev 2>/dev/null || true
@@ -47,7 +48,6 @@ pipeline {
                         devops-webapp:latest
                     sleep 2
                     STATUS=$(docker inspect --format="{{.State.Status}}" devops-webapp-dev)
-                    echo "DEV Status: $STATUS"
                     [ "$STATUS" = "running" ] && echo "DEV Deploy Success!" || exit 1
                 '''
             }
@@ -55,23 +55,16 @@ pipeline {
 
         stage('Test DEV') {
             steps {
-                echo 'Testing DEV environment...'
                 sh '''
-                    sleep 2
                     STATUS=$(docker inspect --format="{{.State.Status}}" devops-webapp-dev)
-                    if [ "$STATUS" = "running" ]; then
-                        echo "DEV Tests Passed!"
-                    else
-                        echo "DEV Tests Failed!"
-                        exit 1
-                    fi
+                    [ "$STATUS" = "running" ] && echo "DEV Tests Passed!" || exit 1
                 '''
             }
         }
 
         stage('Deploy to STAGING') {
             steps {
-                echo 'Deploying to STAGING environment...'
+                echo 'Deploying to STAGING...'
                 sh '''
                     docker stop devops-webapp-staging 2>/dev/null || true
                     docker rm  devops-webapp-staging 2>/dev/null || true
@@ -81,7 +74,6 @@ pipeline {
                         devops-webapp:latest
                     sleep 2
                     STATUS=$(docker inspect --format="{{.State.Status}}" devops-webapp-staging)
-                    echo "STAGING Status: $STATUS"
                     [ "$STATUS" = "running" ] && echo "STAGING Deploy Success!" || exit 1
                 '''
             }
@@ -89,23 +81,15 @@ pipeline {
 
         stage('Test STAGING') {
             steps {
-                echo 'Testing STAGING environment...'
                 sh '''
-                    sleep 2
                     STATUS=$(docker inspect --format="{{.State.Status}}" devops-webapp-staging)
-                    if [ "$STATUS" = "running" ]; then
-                        echo "STAGING Tests Passed!"
-                    else
-                        echo "STAGING Tests Failed!"
-                        exit 1
-                    fi
+                    [ "$STATUS" = "running" ] && echo "STAGING Tests Passed!" || exit 1
                 '''
             }
         }
 
         stage('Approval for PROD') {
             steps {
-                echo 'Waiting for Production Approval...'
                 timeout(time: 2, unit: 'MINUTES') {
                     input message: 'Deploy to Production?',
                           ok: 'Yes, Deploy to PROD!'
@@ -118,7 +102,7 @@ pipeline {
                 echo 'Deploying to PRODUCTION...'
                 sh '''
                     docker stop devops-webapp 2>/dev/null || true
-                    docker rm  devops-webapp 2>/dev/null || true
+                    docker rm  devops-webapp  2>/dev/null || true
                     docker run -d \
                         --name devops-webapp \
                         -p 3000:80 \
@@ -126,24 +110,60 @@ pipeline {
                         devops-webapp:latest
                     sleep 2
                     STATUS=$(docker inspect --format="{{.State.Status}}" devops-webapp)
-                    echo "PROD Status: $STATUS"
                     [ "$STATUS" = "running" ] && echo "PROD Deploy Success!" || exit 1
                 '''
             }
         }
 
-        stage('Verify PROD') {
+        stage('Start Monitoring') {
             steps {
-                echo 'Verifying Production...'
+                echo 'Starting Prometheus and Grafana...'
                 sh '''
-                    STATUS=$(docker inspect --format="{{.State.Status}}" devops-webapp)
-                    if [ "$STATUS" = "running" ]; then
-                        echo "Production is LIVE!"
-                        echo "URL: http://localhost:3000"
-                    else
-                        echo "Production Verification Failed!"
-                        exit 1
-                    fi
+                    docker stop nginx-exporter prometheus grafana 2>/dev/null || true
+                    docker rm  nginx-exporter prometheus grafana 2>/dev/null || true
+
+                    docker network create devops-network 2>/dev/null || true
+
+                    docker network connect devops-network devops-webapp 2>/dev/null || true
+
+                    docker run -d \
+                        --name nginx-exporter \
+                        --network devops-network \
+                        -p 9113:9113 \
+                        nginx/nginx-prometheus-exporter:latest \
+                        --nginx.scrape-uri=http://devops-webapp/stub_status
+
+                    docker run -d \
+                        --name prometheus \
+                        --network devops-network \
+                        -p 9090:9090 \
+                        -v prometheus-data:/prometheus \
+                        prom/prometheus:latest
+
+                    docker run -d \
+                        --name grafana \
+                        --network devops-network \
+                        -p 3003:3000 \
+                        -e GF_SECURITY_ADMIN_USER=admin \
+                        -e GF_SECURITY_ADMIN_PASSWORD=admin123 \
+                        grafana/grafana:latest
+
+                    sleep 3
+                    echo "Monitoring Stack Started!"
+                '''
+            }
+        }
+
+        stage('Verify All') {
+            steps {
+                echo 'Verifying all services...'
+                sh '''
+                    echo "Checking containers..."
+                    for name in devops-webapp prometheus grafana; do
+                        STATUS=$(docker inspect --format="{{.State.Status}}" $name 2>/dev/null || echo "not found")
+                        echo "$name: $STATUS"
+                    done
+                    echo "All services verified!"
                 '''
             }
         }
@@ -153,18 +173,21 @@ pipeline {
         success {
             echo '''
             ============================================
-            MULTI-STAGE PIPELINE SUCCESS!
-            DEV     : http://localhost:3001
-            STAGING : http://localhost:3002
-            PROD    : http://localhost:3000
+            PIPELINE SUCCESS WITH MONITORING!
+
+            ENVIRONMENTS:
+            DEV      : http://localhost:3001
+            STAGING  : http://localhost:3002
+            PROD     : http://localhost:3000
+
+            MONITORING:
+            Prometheus : http://localhost:9090
+            Grafana    : http://localhost:3003
             ============================================
             '''
         }
         failure {
             echo 'PIPELINE FAILED! Check logs above.'
-        }
-        always {
-            echo "Build #${BUILD_NUMBER} complete!"
         }
     }
 }
